@@ -1,10 +1,6 @@
-﻿
-**
+﻿## Generic C library for fingerprint modules
 
-## Generic C library for fingerprint modules
-**
-
-To use it, the following interface needs to be provided to the library, in the form of function pointers with these prototypes:
+To use it, the following interface needs to be provided to the library, which expects function pointers with these prototypes:
 
     /* to get the millisecond count since reset */
     uint32_t (*fpm_millis_func)(void);
