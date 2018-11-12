@@ -1,8 +1,5 @@
-/*************************************************** 
-  This is an improved library for the FPM10/R305/ZFM20 optical fingerprint sensor
-  Based on the Adafruit R305 library https://github.com/adafruit/Adafruit-Fingerprint-Sensor-Library
-  
-  Written by Brian Ejike <brianrho94@gmail.com> (2017)
+/***************************************************   
+  Written by Brian Ejike <brianrho94@gmail.com> (2018)
   Distributed under the terms of the MIT license
  ****************************************************/
 #ifndef FPM_H_
