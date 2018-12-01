@@ -13,7 +13,7 @@ extern "C" {
 #include <stddef.h>
 
 /* R551 is different in a few ways (no high-speed search, off-by-one template indices)
-   comment this line if you have one of those */
+   uncomment this line if you have one of those */
 //#define FPM_R551_MODULE
 
 /* uncomment to enable debug output */
