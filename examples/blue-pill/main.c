@@ -8,7 +8,7 @@
 #include <stdio.h>
 #include <ctype.h>
 
-/* handles for UART comms */
+/* handles for UART comms, using one for debug and the other for the sensor */
 uart_t uart1_dev = {USART1};
 uart_t uart3_dev = {USART3};
 
@@ -20,6 +20,7 @@ void uart3_write(uint8_t * bytes, uint16_t len);
 FPM finger;
 FPM_System_Params params;
 
+/* tested functions */
 void enroll_finger(int16_t fid);
 uint8_t get_free_id(int16_t * fid);
 uint16_t read_template(uint16_t fid, uint8_t * buffer, uint16_t buff_sz);
@@ -50,14 +51,16 @@ int main(void)
 	uart_init(&uart1_dev, 9600);
 	uart_init(&uart3_dev, 57600);
 
+	/* set up the instance, supply UART interface functions too */
 	finger.address = 0xFFFFFFFF;
 	finger.password = 0;
+	finger.manual_settings = 0;
 	finger.avail_func = uart3_avail;
 	finger.read_func = uart3_read;
 	finger.write_func = uart3_write;
 
-	/* init fpm instance, supply millis and delay functions */
-	if (fpm_begin(&finger, millis, delay_ms)) {
+	/* init fpm instance, supply millis function */
+	if (fpm_begin(&finger, millis)) {
 		fpm_read_params(&finger, &params);
 		printf("Found fingerprint sensor!\r\n");
 		printf("Capacity: %d\r\n", params.capacity);
@@ -255,7 +258,7 @@ uint16_t read_template(uint16_t fid, uint8_t * buffer, uint16_t buff_sz) {
 
     // OK success!
 
-    p = fpm_get_model(&finger, 1);
+    p = fpm_download_model(&finger, 1);
     switch (p) {
         case FPM_OK:
             break;
