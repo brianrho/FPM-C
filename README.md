@@ -5,9 +5,6 @@ To use it, the following interface needs to be provided to the library, which ex
     /* to get the millisecond count since reset */
     uint32_t (*fpm_millis_func)(void);
     
-    /* millisecond delays */
-    void (*fpm_delay_func)(uint32_t interval);
-    
     /* to read from the UART port connected to the module */
     uint16_t (*fpm_uart_read_func)(uint8_t * bytes, uint16_t len);
     

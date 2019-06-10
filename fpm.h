@@ -16,11 +16,16 @@ extern "C" {
    uncomment this line if you have one of those */
 //#define FPM_R551_MODULE
 
-/* uncomment to enable debug output */
-//#define FPM_ENABLE_DEBUG
+/* Set the debug level
+   0: Disabled
+   1: Errors only
+   2: Everything
+ */
+#define FPM_DEBUG_LEVEL             1
 
 // confirmation codes
 #define FPM_OK                      0x00
+#define FPM_HANDSHAKE_OK            0x55
 #define FPM_PACKETRECIEVEERR        0x01
 #define FPM_NOFINGER                0x02
 #define FPM_IMAGEFAIL               0x03
@@ -57,7 +62,7 @@ extern "C" {
 #define FPM_REGMODEL                0x05
 #define FPM_STORE                   0x06
 #define FPM_LOAD                    0x07
-#define FPM_UPLOAD                  0x08
+#define FPM_UPCHAR                  0x08
 #define FPM_DOWNCHAR                0x09
 #define FPM_IMGUPLOAD               0x0A
 #define FPM_DELETE                  0x0C
@@ -72,6 +77,7 @@ extern "C" {
 #define FPM_PAIRMATCH               0x03
 #define FPM_SETPASSWORD             0x12
 #define FPM_STANDBY                 0x33
+#define FPM_HANDSHAKE               0x53
 
 #define FPM_LEDON                   0x50
 #define FPM_LEDOFF                  0x51
@@ -91,9 +97,12 @@ extern "C" {
 /* 32 is max packet length for ACKed commands, +1 for confirmation code */
 #define FPM_BUFFER_SZ               (32 + 1)
 
-/* default timeout is 1 second */
-#define FPM_DEFAULT_TIMEOUT         1000
+/* default timeout is 2 seconds */
+#define FPM_DEFAULT_TIMEOUT         2000
 #define FPM_TEMPLATES_PER_PAGE      256
+
+#define FPM_DEFAULT_PASSWORD        0x00000000
+#define FPM_DEFAULT_ADDRESS         0xFFFFFFFF
 
 /* use these constants when setting system 
  * parameters with the setParam() method */
@@ -139,12 +148,12 @@ enum {
     FPM_PLEN_NONE = 0xff
 };
 
-// possible output containers for template/image data read from the module
+/* possible output containers for template/image data read from the module */
 enum {
     FPM_OUTPUT_TO_STREAM,
     FPM_OUTPUT_TO_BUFFER
 };
-
+ 
 typedef struct {
     uint16_t status_reg;
     uint16_t system_id;
@@ -159,7 +168,6 @@ typedef uint16_t (*fpm_uart_read_func)(uint8_t * bytes, uint16_t len);
 typedef void (*fpm_uart_write_func)(uint8_t * bytes, uint16_t len);
 typedef uint16_t (*fpm_uart_avail_func)(void);
 typedef uint32_t (*fpm_millis_func)(void);
-typedef void (*fpm_delay_func)(uint32_t interval);
 
 typedef struct {
     fpm_uart_read_func read_func;
@@ -169,11 +177,33 @@ typedef struct {
     uint32_t password;
     uint32_t address;
     
+    /* only set this flag if you have an R308 or want to set parameters manually */
+    uint8_t manual_settings;
+    
+    /* no need to initialize this member unless you have an R308 sensor,
+       or want to set parameters manually.
+       In that case, make sure to use the defaults below,
+       only capacity and packet length are actually relevant */
     FPM_System_Params sys_params;
+    
     uint8_t buffer[FPM_BUFFER_SZ];
 } FPM;
 
-uint8_t fpm_begin(FPM * fpm, fpm_millis_func _millis_func, fpm_delay_func _delay_func);
+/* Default parameters to be used with R308 sensor (and similar)
+
+   status_reg: 0x0000,
+   system_id: 0x0000,
+   capacity: <Your-module-capacity>,
+   security_level: FPM_FRR_5,
+   device_addr: 0xFFFFFFFF,
+   packet_len: FPM_PLEN_128,
+   baud_rate: FPM_BAUD_57600
+   
+*/
+
+
+uint8_t fpm_begin(FPM * fpm, fpm_millis_func _millis_func);
+
 int16_t fpm_get_image(FPM * fpm);
 int16_t fpm_get_imageNL(FPM * fpm);
 int16_t fpm_image2Tz(FPM * fpm, uint8_t slot);
@@ -191,8 +221,8 @@ uint8_t fpm_read_raw(FPM * fpm, uint8_t outType, void * out, uint8_t * read_comp
 void fpm_write_raw(FPM * fpm, uint8_t * data, uint16_t len);
 
 /* initiates the transfer of the template in buffer #'slot' to the MCU */
-int16_t fpm_get_model(FPM * fpm, uint8_t slot);
-int16_t fpm_upload_model(FPM * fpm);
+int16_t fpm_download_model(FPM * fpm, uint8_t slot);
+int16_t fpm_upload_model(FPM * fpm, uint8_t slot);
 int16_t fpm_delete_model(FPM * fpm, uint16_t id, uint16_t how_many);
 int16_t fpm_search_database(FPM * fpm, uint16_t * finger_id, uint16_t * score, uint8_t slot);
 int16_t fpm_get_template_count(FPM * fpm, uint16_t * template_cnt);
@@ -203,7 +233,15 @@ int16_t fpm_get_random_number(FPM * fpm, uint32_t * number);
 
 int16_t fpm_led_on(FPM * fpm);
 int16_t fpm_led_off(FPM * fpm);
+
+/* tested on R551 sensors (by [xsrf]),
+   standby current measured at 10uA, UART and LEDs turned off,
+   no other documentation available */
 int16_t fpm_standby(FPM * fpm);
+
+/* NEW: found in Z70 sensor datasheet but not tested yet. 
+   Should return true if the sensor is ready to accept commands */
+uint8_t fpm_handshake(FPM * fpm);
 
 extern const uint16_t fpm_packet_lengths[];
 

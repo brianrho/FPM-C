@@ -1,22 +1,29 @@
 #include "fpm.h"
 #include <string.h>
 
-#if defined(FPM_ENABLE_DEBUG)
-    #define FPM_DEFAULT_STREAM          Serial
-
-    #define FPM_DEBUG_PRINT(x)          FPM_DEFAULT_STREAM.print(x)
-    #define FPM_DEBUG_PRINTLN(x)        FPM_DEFAULT_STREAM.println(x)
-    #define FPM_DEBUG_DEC(x)            FPM_DEFAULT_STREAM.print(x)
-    #define FPM_DEBUG_DECLN(x)          FPM_DEFAULT_STREAM.println(x)
-    #define FPM_DEBUG_HEX(x)            FPM_DEFAULT_STREAM.print(x, HEX)
-    #define FPM_DEBUG_HEXLN(x)          FPM_DEFAULT_STREAM.println(x, HEX) 
+#if (FPM_DEBUG_LEVEL == 0)
+    
+    #define FPM_INFO_PRINT(...)
+    #define FPM_INFO_PRINTLN(...)
+    
+    #define FPM_ERROR_PRINT(...)
+    #define FPM_ERROR_PRINTLN(...)
+    
 #else
-    #define FPM_DEBUG_PRINT(x)
-    #define FPM_DEBUG_PRINTLN(x)
-    #define FPM_DEBUG_DEC(x)          
-    #define FPM_DEBUG_DECLN(x)
-    #define FPM_DEBUG_HEX(x)
-    #define FPM_DEBUG_HEXLN(x)
+    
+    #include <stdio.h>
+    
+    #define FPM_ERROR_PRINT(...)          		printf(__VA_ARGS__)
+    #define FPM_ERROR_PRINTLN(fmt, ...)    		printf(fmt"\n", ##__VA_ARGS__)
+    
+    #if (FPM_DEBUG_LEVEL == 1)        
+        #define FPM_INFO_PRINT(...)
+        #define FPM_INFO_PRINTLN(...)
+    #else
+        #define FPM_INFO_PRINT(...)           	printf(__VA_ARGS__)
+        #define FPM_INFO_PRINTLN(...)         	printf(fmt"\n", ##__VA_ARGS__)
+    #endif
+
 #endif
 
 static void write_packet(FPM * fpm, uint8_t packettype, uint8_t * packet, uint16_t len);
@@ -25,7 +32,6 @@ static int16_t read_ack_get_response(FPM * fpm, uint8_t * rc);
 
 const uint16_t fpm_packet_lengths[] = {32, 64, 128, 256};
 static fpm_millis_func millis_func;
-static fpm_delay_func delay_func;
 
 typedef enum {
     FPM_STATE_READ_HEADER,
@@ -36,11 +42,11 @@ typedef enum {
     FPM_STATE_READ_CHECKSUM
 } FPM_State;
 
-uint8_t fpm_begin(FPM * fpm, fpm_millis_func _millis_func, fpm_delay_func _delay_func) {
+uint8_t fpm_begin(FPM * fpm, fpm_millis_func _millis_func) {
     millis_func = _millis_func;
-    delay_func = _delay_func;
     
-    delay_func(1000);            // 500 ms at least according to datasheet
+    uint32_t start = millis_func();
+    while (millis_func() - start < 1000);   // 500 ms at least according to datasheet
     
     fpm->buffer[0] = FPM_VERIFYPASSWORD;
     fpm->buffer[1] = (fpm->password >> 24) & 0xff; fpm->buffer[2] = (fpm->password >> 16) & 0xff;
@@ -53,7 +59,7 @@ uint8_t fpm_begin(FPM * fpm, fpm_millis_func _millis_func, fpm_delay_func _delay
     if (len < 0 || confirm_code != FPM_OK)
         return 0;
 
-    if (fpm_read_params(fpm, NULL) != FPM_OK)
+    if (!fpm->manual_settings && fpm_read_params(fpm, NULL) != FPM_OK)
         return 0;
     
     return 1;
@@ -125,9 +131,6 @@ int16_t fpm_led_off(FPM * fpm) {
     return confirm_code;
 }
 
-/* tested on R551 modules,
-   standby current measured at 10uA, UART and LEDs turned off,
-   no other documentation available */
 int16_t fpm_standby(FPM * fpm) {
     fpm->buffer[0] = FPM_STANDBY;
     write_packet(fpm, FPM_COMMANDPACKET, fpm->buffer, 1);
@@ -200,6 +203,10 @@ int16_t fpm_load_model(FPM * fpm, uint16_t id, uint8_t slot) {
 
 
 int16_t fpm_set_param(FPM * fpm, uint8_t param, uint8_t value) {
+    if (fpm->manual_settings) {
+        return FPM_PACKETRECIEVEERR;
+    }
+    
 	fpm->buffer[0] = FPM_SETSYSPARAM;
     fpm->buffer[1] = param; fpm->buffer[2] = value;
     
@@ -213,7 +220,10 @@ int16_t fpm_set_param(FPM * fpm, uint8_t param, uint8_t value) {
     if (confirm_code != FPM_OK)
         return confirm_code;
     
-    delay_func(100);
+    /* gets weird if you dont wait */
+    uint32_t start = millis_func();
+    while (millis_func() - start < 100);
+    
     fpm_read_params(fpm, NULL);
     return confirm_code;
 }
@@ -230,6 +240,12 @@ static void reverse_bytes(void *start, uint16_t size) {
 }
 
 int16_t fpm_read_params(FPM * fpm, FPM_System_Params * user_params) {
+    if (fpm->manual_settings) {
+        if (user_params != NULL)
+            memcpy(user_params, &fpm->sys_params, 16);
+        return FPM_OK;
+    }
+    
     fpm->buffer[0] = FPM_READSYSPARAM;
     
 	write_packet(fpm, FPM_COMMANDPACKET, fpm->buffer, 1);
@@ -242,8 +258,10 @@ int16_t fpm_read_params(FPM * fpm, FPM_System_Params * user_params) {
     if (confirm_code != FPM_OK)
         return confirm_code;
     
-    if (len != 16)
+    if (len != 16) {
+        FPM_ERROR_PRINTLN("[+]Unexpected params length: %d", len);
         return FPM_READ_ERROR;
+    }
     
     memcpy(&fpm->sys_params, &fpm->buffer[1], 16);
     reverse_bytes(&fpm->sys_params.status_reg, 2);
@@ -285,19 +303,18 @@ uint8_t fpm_read_raw(FPM * fpm, uint8_t outType, void * out, uint8_t * read_comp
     else
         return 0;
     
-    uint16_t chunk_sz = fpm_packet_lengths[fpm->sys_params.packet_len];
     uint8_t pid;
     int16_t len;
     
+    /* read into a buffer or straight to a serial port */
     if (outType == FPM_OUTPUT_TO_BUFFER)
         len = get_reply(fpm, outBuf, *read_len, &pid, NULL);
     else if (outType == FPM_OUTPUT_TO_STREAM)
         len = get_reply(fpm, NULL, 0, &pid, out_stream);
     
-    /* check the length */
-    if (len != chunk_sz) {
-        FPM_DEBUG_PRINT("Read data failed: ");
-        FPM_DEBUG_PRINTLN(len);
+    /* check that the length is > 0 */
+    if (len <= 0) {
+        FPM_ERROR_PRINTLN("[+]Wrong read length: %d", len);
         return 0;
     }
     
@@ -327,8 +344,8 @@ void fpm_write_raw(FPM * fpm, uint8_t * data, uint16_t len) {
 }
 
 //transfer a fingerprint template from Char Buffer 1 to host computer
-int16_t fpm_get_model(FPM * fpm, uint8_t slot) {
-    fpm->buffer[0] = FPM_UPLOAD;
+int16_t fpm_download_model(FPM * fpm, uint8_t slot) {
+    fpm->buffer[0] = FPM_UPCHAR;
     fpm->buffer[1] = slot;
     write_packet(fpm, FPM_COMMANDPACKET, fpm->buffer, 2);
     uint8_t confirm_code = 0;
@@ -340,9 +357,9 @@ int16_t fpm_get_model(FPM * fpm, uint8_t slot) {
     return confirm_code;
 }
 
-int16_t fpm_upload_model(FPM * fpm) {
+int16_t fpm_upload_model(FPM * fpm, uint8_t slot) {
     fpm->buffer[0] = FPM_DOWNCHAR;
-    fpm->buffer[1] = 0x01;
+    fpm->buffer[1] = slot;
     write_packet(fpm, FPM_COMMANDPACKET, fpm->buffer, 2);
     uint8_t confirm_code = 0;
     int16_t rc = read_ack_get_response(fpm, &confirm_code);
@@ -382,11 +399,7 @@ int16_t fpm_empty_database(FPM * fpm) {
 
 int16_t fpm_search_database(FPM * fpm, uint16_t * finger_id, uint16_t * score, uint8_t slot) {
     // high speed search of slot #1 starting at page 0 to 'capacity'
-    #if defined(FPM_R551_MODULE)
     fpm->buffer[0] = FPM_SEARCH;
-    #else
-    fpm->buffer[0] = FPM_HISPEEDSEARCH;
-    #endif
     fpm->buffer[1] = slot;
     fpm->buffer[2] = 0x00; fpm->buffer[3] = 0x00;
     fpm->buffer[4] = (uint8_t)(fpm->sys_params.capacity >> 8);
@@ -527,6 +540,18 @@ int16_t fpm_get_random_number(FPM * fpm, uint32_t * number) {
     return confirm_code;
 }
 
+uint8_t fpm_handshake(FPM * fpm) {
+    fpm->buffer[0] = FPM_EMPTYDATABASE;
+    write_packet(fpm, FPM_COMMANDPACKET, fpm->buffer, 1);
+    uint8_t confirm_code = 0;
+    int16_t rc = read_ack_get_response(fpm, &confirm_code);
+
+    if (rc < 0)
+        return rc;
+
+    return confirm_code == FPM_HANDSHAKE_OK;
+}
+
 static void write_packet(FPM * fpm, uint8_t packettype, uint8_t * packet, uint16_t len) {
     len += 2;
     
@@ -578,7 +603,7 @@ static int16_t get_reply(FPM * fpm, uint8_t * replyBuf, uint16_t buflen,
                 state = FPM_STATE_READ_ADDRESS;
                 header = 0;
                 
-                FPM_DEBUG_PRINTLN("\r\n[+]Got header");
+                FPM_INFO_PRINTLN("\r\n[+]Got header");
                 break;
             }
             case FPM_STATE_READ_ADDRESS: {
@@ -594,12 +619,12 @@ static int16_t get_reply(FPM * fpm, uint8_t * replyBuf, uint16_t buflen,
                 
                 if (addr != fpm->address) {
                     state = FPM_STATE_READ_HEADER;
-                    FPM_DEBUG_PRINTLN("[+]Wrong fpm->address");
+                    FPM_ERROR_PRINTLN("[+]Wrong address: 0x%lX", addr);
                     break;
                 }
                 
                 state = FPM_STATE_READ_PID;
-                FPM_DEBUG_PRINT("[+]fpm->address: 0x"); FPM_DEBUG_HEXLN(fpm->address);
+                FPM_INFO_PRINTLN("[+]Address: 0x%lX", addr);
                 
                 break;
             }
@@ -613,7 +638,7 @@ static int16_t get_reply(FPM * fpm, uint8_t * replyBuf, uint16_t buflen,
                 *pktid = pid;
                 
                 state = FPM_STATE_READ_LENGTH;
-                FPM_DEBUG_PRINT("[+]PID: 0x"); FPM_DEBUG_HEXLN(pid);
+                FPM_INFO_PRINTLN("[+]PID: 0x%X", pid);
                 
                 break;
             case FPM_STATE_READ_LENGTH: {
@@ -627,7 +652,7 @@ static int16_t get_reply(FPM * fpm, uint8_t * replyBuf, uint16_t buflen,
                 
                 if (length > FPM_MAX_PACKET_LEN + 2 || (out_stream == NULL && length > buflen + 2)) {
                     state = FPM_STATE_READ_HEADER;
-                    FPM_DEBUG_PRINTLN("[+]Packet too long");
+                    FPM_ERROR_PRINTLN("[+]Packet too long: %d", length);
                     continue;
                 }
                 
@@ -636,7 +661,7 @@ static int16_t get_reply(FPM * fpm, uint8_t * replyBuf, uint16_t buflen,
                 
                 chksum += fpm->buffer[0]; chksum += fpm->buffer[1];
                 state = FPM_STATE_READ_CONTENTS;
-                FPM_DEBUG_PRINT("[+]Length: "); FPM_DEBUG_DECLN(length - 2);
+                FPM_INFO_PRINTLN("[+]Length: %d", length - 2);
                 break;
             }
             case FPM_STATE_READ_CONTENTS: {
@@ -659,10 +684,11 @@ static int16_t get_reply(FPM * fpm, uint8_t * replyBuf, uint16_t buflen,
                 }
                 else {
                     *replyBuf++ = byte;
-                    chksum += byte;
                 }
                 
-                FPM_DEBUG_HEX(byte); FPM_DEBUG_PRINT(" ");
+                chksum += byte;
+                
+                FPM_INFO_PRINT("%lX ");
                 remn--;
                 break;
             }
@@ -676,20 +702,20 @@ static int16_t get_reply(FPM * fpm, uint8_t * replyBuf, uint16_t buflen,
                 uint16_t to_check = temp[0]; to_check <<= 8;
                 to_check |= temp[1];
                 
-                if (out_stream == NULL && to_check != chksum) {
+                if (to_check != chksum) {
                     state = FPM_STATE_READ_HEADER;
-                    FPM_DEBUG_PRINTLN("\r\n[+]Wrong chksum");
+                    FPM_ERROR_PRINTLN("\r\n[+]Wrong chksum: 0x%X", to_check);
                     continue;
                 }
                 
-                FPM_DEBUG_PRINTLN("\r\n[+]Read complete");
+                FPM_INFO_PRINTLN("\r\n[+]Read complete");
                 /* without chksum */
                 return length - 2;
             }
         }
     }
     
-    FPM_DEBUG_PRINTLN();
+    FPM_ERROR_PRINTLN("[+]Response timeout\r\n");
     return FPM_TIMEOUT;
 }
 
@@ -704,8 +730,10 @@ static int16_t read_ack_get_response(FPM * fpm, uint8_t * rc) {
         return len;
     
     /* wrong pkt id */
-    if (pktid != FPM_ACKPACKET)
+    if (pktid != FPM_ACKPACKET) {
+        FPM_ERROR_PRINTLN("[+]Wrong PID: 0x%X", pktid);
         return FPM_READ_ERROR;
+    }
     
     *rc = fpm->buffer[0];
     
