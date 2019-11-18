@@ -497,7 +497,7 @@ int16_t fpm_get_free_index(FPM * fpm, uint8_t page, int16_t * id) {
         
         for (uint8_t bit_mask = 0x01, fid = 0; bit_mask != 0; bit_mask <<= 1, fid++) {
             if ((bit_mask & group) == 0) {
-                #if defined(FPM_R551_MODULE)
+                #if defined(FPM_IS_R551_SENSOR)
                 if (page == 0 && group_idx == 0 && fid == 0)     /* Skip LSb of first group */
                     continue;
                 *id = (FPM_TEMPLATES_PER_PAGE * page) + (group_idx * 8) + fid - 1;      /* all IDs are off by one */
@@ -541,7 +541,7 @@ int16_t fpm_get_random_number(FPM * fpm, uint32_t * number) {
 }
 
 uint8_t fpm_handshake(FPM * fpm) {
-    fpm->buffer[0] = FPM_EMPTYDATABASE;
+    fpm->buffer[0] = FPM_HANDSHAKE;
     write_packet(fpm, FPM_COMMANDPACKET, fpm->buffer, 1);
     uint8_t confirm_code = 0;
     int16_t rc = read_ack_get_response(fpm, &confirm_code);

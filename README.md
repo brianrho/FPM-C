@@ -1,6 +1,6 @@
 ﻿## Generic C library for R3xx/ZFMxx/FPMxx/R551 fingerprint modules
 
-To use it, the following interface needs to be provided to the library, which expects function pointers with these prototypes:
+To use it, the following interface needs to be provided to the library, which expects function pointers with these signatures:
 
     /* to get the millisecond count since reset */
     uint32_t (*fpm_millis_func)(void);
@@ -14,4 +14,5 @@ To use it, the following interface needs to be provided to the library, which ex
     /* to get the current number of available bytes to be read */
     uint16_t (*fpm_uart_avail_func)(void);
 
-Check out the examples for details.
+It is assumed that UART interrupts are in use, especially for RX events, typically with incoming data being read into a buffer.
+Check the examples for details.

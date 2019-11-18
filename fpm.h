@@ -12,9 +12,18 @@ extern "C" {
 #include <stdint.h>
 #include <stddef.h>
 
+/***************** R551 or not? ************************/
+
 /* R551 is different in a few ways (no high-speed search, off-by-one template indices)
    uncomment this line if you have one of those */
-//#define FPM_R551_MODULE
+//#define FPM_IS_R551_SENSOR
+
+/***************** GROW sensor or not? *****************/
+
+/* uncomment if you've got a sensor from GROW like the R30x, R5xx, ... */
+#define FPM_IS_GROW_SENSOR
+
+/***************DEBUG SETTINGS *************************/
 
 /* Set the debug level
    0: Disabled
@@ -77,7 +86,12 @@ extern "C" {
 #define FPM_PAIRMATCH               0x03
 #define FPM_SETPASSWORD             0x12
 #define FPM_STANDBY                 0x33
+
+#if defined(FPM_IS_GROW_SENSOR)
+#define FPM_HANDSHAKE               0x40
+#else
 #define FPM_HANDSHAKE               0x53
+#endif
 
 #define FPM_LEDON                   0x50
 #define FPM_LEDOFF                  0x51
