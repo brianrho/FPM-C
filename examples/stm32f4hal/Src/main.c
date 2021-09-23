@@ -45,10 +45,12 @@ void enroll_finger(int16_t fid);
 uint8_t get_free_id(int16_t * fid);
 uint16_t read_template(uint16_t fid, uint8_t * buffer, uint16_t buff_sz);
 void match_prints(int16_t fid, int16_t otherfid);
+void search_database(void);
 
 void enroll_mainloop(void);
 void templates_mainloop(void);
 void matchprints_mainloop(void);
+void searchdb_mainloop(void);
 
 /**
  * @brief  The application entry point.
@@ -68,6 +70,9 @@ int main(void)
     uart_init(USART1, 57600);
 
     uart_init(USART3, 57600);
+
+    /* disable stdout buffering */
+    setvbuf(stdout, NULL, _IONBF, 0);
 
     /* set up the instance, supply UART interface functions too */
     finger.address = 0xFFFFFFFF;
@@ -91,7 +96,8 @@ int main(void)
     }
 
     /* uncomment only one to test */
-    enroll_mainloop();
+    //enroll_mainloop();
+    searchdb_mainloop();
     //templates_mainloop();
     //matchprints_mainloop();
 }
@@ -237,6 +243,79 @@ void matchprints_mainloop(void)
         while (uart_read_byte(USART1) != -1);  // clear buffer
     }
 }
+
+void searchdb_mainloop(void)
+{
+    while (1)
+    {
+        printf("\r\nSend any character to search for a print...\r\n");
+        while (uart_avail(USART1) == 0);
+        search_database();
+        while (uart_read_byte(USART1) != -1);
+    }
+}
+
+void search_database(void)
+{
+    int16_t p = -1;
+
+    /* first get the finger image */
+    printf("Waiting for valid finger\r\n");
+    while (p != FPM_OK) {
+        p = fpm_get_image(&finger);
+        switch (p) {
+            case FPM_OK:
+                printf("Image taken\r\n");
+                break;
+            case FPM_NOFINGER:
+                printf(".");
+                break;
+            default:
+                printf("Error: %d\r\n", p);
+                return;
+        }
+    }
+
+    /* convert it and store in buffer/slot 1 */
+    p = fpm_image2Tz(&finger, 1);
+    switch (p) {
+        case FPM_OK:
+            printf("Image converted\r\n");
+            break;
+        default:
+            printf("Error: %d\r\n", p);
+            return;
+    }
+
+    /* search the database for the converted print (now in slot 1) */
+    uint16_t fid, score;
+    p = fpm_search_database(&finger, &fid, &score, 1);
+
+    /* now wait to remove the finger, though not necessary;
+       this was moved here after the search because of the R503 sensor,
+       which seems to wipe its buffers after each scan */
+    printf("Remove finger\r\n");
+    while (fpm_get_image(&finger) != FPM_NOFINGER) {
+        HAL_Delay(500);
+    }
+    printf("\r\n");
+
+    if (p == FPM_OK) {
+        printf("Found a print match!\r\n");
+    }
+    else if (p == FPM_NOTFOUND) {
+        printf("Did not find a match\r\n");
+        return;
+    }
+    else {
+        printf("Error: %d\r\n", p);
+        return;
+    }
+
+    // found a match!
+    printf("Found at ID #%d with confidence %d\r\n", fid, score);
+}
+
 
 void enroll_finger(int16_t fid)
 {
